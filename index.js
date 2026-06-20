@@ -4,10 +4,10 @@ const fs    = require('fs');
 const login = require('fca-unofficial');
 
 const { sendHuman, markReadHuman, simulateBrowsing } = require('./utils/human');
-const { startSessionSaver, syncEnvState }            = require('./utils/session');
+const { loadAppState, startSessionSaver, syncEnvState } = require('./utils/session');
 
 // ──────────────────────────────────────────────
-// تحميل config.json إلى الذاكرة
+// تحميل config.json
 // ──────────────────────────────────────────────
 let config;
 try {
@@ -17,9 +17,6 @@ try {
   process.exit(1);
 }
 
-// ──────────────────────────────────────────────
-// حفظ التغييرات في config.json
-// ──────────────────────────────────────────────
 function saveConfig() {
   try {
     fs.writeFileSync('./config.json', JSON.stringify(config, null, 2));
@@ -29,7 +26,7 @@ function saveConfig() {
 }
 
 // ──────────────────────────────────────────────
-// قائمة المشرفين
+// المشرفون — fallback مدمج إن لم يوجد ADMIN_IDS
 // ──────────────────────────────────────────────
 const ADMINS = (process.env.ADMIN_IDS || '61590560891542,61591138526841')
   .split(',')
@@ -64,7 +61,7 @@ function stopAutoSend() {
 }
 
 // ──────────────────────────────────────────────
-// استيراد وحدات الأوامر
+// وحدات الأوامر
 // ──────────────────────────────────────────────
 const commands = {
   uptime:   require('./commands/uptime'),
@@ -131,7 +128,7 @@ async function handleEvent(api, event, startTime) {
 }
 
 // ──────────────────────────────────────────────
-// المستمع الرئيسي — callback عادية (غير async) عمداً
+// المستمع — callback عادية (غير async) عمداً
 // ──────────────────────────────────────────────
 function startListener(api, startTime) {
   api.listenMqtt((err, event) => {
@@ -147,18 +144,11 @@ function startListener(api, startTime) {
 }
 
 // ──────────────────────────────────────────────
-// تسجيل الدخول — يقرأ appstate.json مباشرة
-// لا حاجة لمتغير APPSTATE في Railway
+// تسجيل الدخول وبدء التشغيل
 // ──────────────────────────────────────────────
 (async () => {
-  let appState;
-  try {
-    appState = JSON.parse(fs.readFileSync('./appstate.json', 'utf8'));
-    console.log('[Startup] ✅ تم تحميل appstate.json');
-  } catch (e) {
-    console.error('[Startup] فشل قراءة appstate.json:', e.message);
-    process.exit(1);
-  }
+  // تحميل الجلسة — يجرب: appstate.json ← backup ← GitHub ← APPSTATE_JSON
+  const appState = await loadAppState();
 
   try {
     login({ appState }, (err, api) => {
@@ -171,7 +161,6 @@ function startListener(api, startTime) {
 
       const startTime = Date.now();
 
-      // حفظ الجلسة كل 5 دقائق في appstate.json
       startSessionSaver(api);
 
       if (config.autosend && config.autosendThreadID) {
