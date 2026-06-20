@@ -1,3 +1,11 @@
+/**
+ * human.js
+ * محاكاة السلوك البشري في الإرسال والقراءة والتصفح.
+ * يستخدم safeTyping من typingGuard.js بدل استدعاء sendTypingIndicator مباشرة.
+ */
+
+const { safeTyping, sleep } = require('./typingGuard');
+
 const TYPING_SPEED_MS_PER_CHAR = 45;
 const MIN_TYPING = 1000;
 const MAX_TYPING = 6000;
@@ -16,22 +24,17 @@ function browseDelay() {
   return Math.floor(Math.random() * 5000) + 3000;
 }
 
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
+/**
+ * sendHuman — إرسال رسالة مع محاكاة الكتابة البشرية
+ * يستخدم safeTyping (timeout + finally) بدل sendTypingIndicator المباشر.
+ */
 async function sendHuman(api, message, threadID) {
+  // تأخير تفكير
   await sleep(thinkDelay());
-  await new Promise((resolve) => {
-    api.sendTypingIndicator(threadID, (err, stop) => {
-      if (err) return resolve();
-      const duration = typingDuration(message);
-      setTimeout(() => {
-        stop();
-        resolve();
-      }, duration);
-    });
-  });
+
+  // إظهار مؤشر الكتابة بأمان ثم الإرسال
+  await safeTyping(api, threadID, typingDuration(message));
+
   return new Promise((resolve, reject) => {
     api.sendMessage(message, threadID, (err, info) => {
       if (err) return reject(err);
@@ -40,6 +43,9 @@ async function sendHuman(api, message, threadID) {
   });
 }
 
+/**
+ * markReadHuman — تعليم الرسالة كمقروءة مع تأخير عشوائي
+ */
 async function markReadHuman(api, event) {
   await sleep(Math.floor(Math.random() * 1500) + 300);
   return new Promise((resolve) => {
@@ -47,6 +53,9 @@ async function markReadHuman(api, event) {
   });
 }
 
+/**
+ * simulateBrowsing — نشاط صامت في الخلفية
+ */
 async function simulateBrowsing() {
   await sleep(browseDelay());
 }
