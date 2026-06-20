@@ -105,7 +105,9 @@ async function handleEvent(api, event, startTime) {
 
   if (event.type !== 'message') return;
 
-  await markReadHuman(api, event);
+  // fire-and-forget — لا نُوقف المعالجة بسببه
+  // api.markAsRead لا يستدعي callback أحياناً → await يتجمد للأبد
+  markReadHuman(api, event).catch(() => {});
 
   const body = (event.body || '').trim();
   if (!body.startsWith(PREFIX)) return;
