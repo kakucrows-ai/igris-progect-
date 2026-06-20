@@ -6,18 +6,18 @@
 
 const { safeTyping, sleep } = require('./typingGuard');
 
-const TYPING_SPEED_MS_PER_CHAR = 45;
-const MIN_TYPING = 1000;
-const MAX_TYPING = 6000;
+const TYPING_SPEED_MS_PER_CHAR = 30;
+const MIN_TYPING = 500;
+const MAX_TYPING = 3000;
 
 function typingDuration(text = '') {
   const base   = text.length * TYPING_SPEED_MS_PER_CHAR;
-  const jitter = Math.floor(Math.random() * 800) - 400;
+  const jitter = Math.floor(Math.random() * 300) - 150;
   return Math.min(MAX_TYPING, Math.max(MIN_TYPING, base + jitter));
 }
 
 function thinkDelay() {
-  return Math.floor(Math.random() * 2000) + 500;
+  return Math.floor(Math.random() * 800) + 200; // 200ms–1000ms
 }
 
 function browseDelay() {
