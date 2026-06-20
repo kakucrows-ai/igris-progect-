@@ -7,7 +7,7 @@
  * حالات في مكان واحد بدل تكرار نفس المنطق في كل دالة إرسال.
  */
 
-const TYPING_TIMEOUT_MS = 8000; // الحد الأقصى للانتظار قبل المتابعة بالقوة
+const TYPING_TIMEOUT_MS = 3000; // الحد الأقصى للانتظار قبل المتابعة بالقوة
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
