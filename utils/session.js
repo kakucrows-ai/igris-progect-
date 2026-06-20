@@ -1,6 +1,7 @@
 const fs   = require('fs');
 const path = require('path');
 
+// يحفظ الجلسة في appstate.json مباشرة (نفس الملف الذي يقرأه index.js)
 const APPSTATE_PATH = path.resolve('./appstate.json');
 const BACKUP_PATH   = path.resolve('./appstate.backup.json');
 const SAVE_INTERVAL = 5 * 60 * 1000;
@@ -19,9 +20,10 @@ function saveSession(api) {
 
 function startSessionSaver(api) {
   setInterval(() => saveSession(api), SAVE_INTERVAL);
-  console.log('[Session] بدأ الحفظ التلقائي كل 5 دقائق');
+  console.log('[Session] بدأ الحفظ التلقائي كل 5 دقائق في appstate.json');
 }
 
+// يُحدِّث process.env للاستخدام الداخلي فقط
 function syncEnvState(api) {
   try {
     const state = api.getAppState();
