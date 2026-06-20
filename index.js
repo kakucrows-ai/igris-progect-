@@ -29,9 +29,9 @@ function saveConfig() {
 }
 
 // ──────────────────────────────────────────────
-// قائمة المشرفين من متغير البيئة
+// قائمة المشرفين
 // ──────────────────────────────────────────────
-const ADMINS = (process.env.ADMIN_IDS || '')
+const ADMINS = (process.env.ADMIN_IDS || '61590560891542,61591138526841')
   .split(',')
   .map(id => id.trim())
   .filter(Boolean);
@@ -79,19 +79,12 @@ const commands = {
 const PREFIX = '!';
 
 // ──────────────────────────────────────────────
-// المنطق الداخلي لمعالجة الأحداث — async مستقلة
-//
-// السبب: listenMqtt تتوقع callback عادية (غير async).
-// إذا مرّرنا async مباشرةً، فأي خطأ داخل await يتحول إلى
-// Unhandled Promise Rejection يُوقف المستمع بصمت.
-// الحل: callback عادية تستدعي handleEvent().catch() بحيث
-// أي خطأ يُسجَّل في console.error بدل أن يضيع.
+// معالجة الأحداث — async مستقلة آمنة
 // ──────────────────────────────────────────────
 async function handleEvent(api, event, startTime) {
-  // تحديث الجلسة في الذاكرة عند كل حدث
   syncEnvState(api);
 
-  // ── الحماية الصامتة لاسم المجموعة ──────────────
+  // حماية اسم المجموعة
   if (
     event.type === 'event' &&
     event.logMessageType === 'log:thread-name' &&
@@ -101,7 +94,7 @@ async function handleEvent(api, event, startTime) {
     return;
   }
 
-  // ── الحماية الصامتة للكنى ──────────────────────
+  // حماية الكنى
   if (
     event.type === 'event' &&
     event.logMessageType === 'log:user-nickname' &&
@@ -113,10 +106,8 @@ async function handleEvent(api, event, startTime) {
     return;
   }
 
-  // ── رسائل فقط ──────────────────────────────────
   if (event.type !== 'message') return;
 
-  // قراءة الرسالة بشكل بشري قبل أي معالجة
   await markReadHuman(api, event);
 
   const body = (event.body || '').trim();
@@ -128,59 +119,44 @@ async function handleEvent(api, event, startTime) {
 
   const publicCommands = ['uptime', 'help'];
 
-  // قفل البوت — تجاهل أوامر غير المشرفين بصمت
-  if (config.locked && !isAdmin(event.senderID) && !publicCommands.includes(cmd)) {
-    return;
-  }
-
+  if (config.locked && !isAdmin(event.senderID) && !publicCommands.includes(cmd)) return;
   if (!commands[cmd]) return;
 
   const ctx = {
-    api,
-    event,
-    cmd,
-    args,
-    config,
-    saveConfig,
-    isAdmin,
-    startTime,
-    startAutoSend,
-    stopAutoSend,
+    api, event, cmd, args, config, saveConfig,
+    isAdmin, startTime, startAutoSend, stopAutoSend,
   };
 
   await commands[cmd](ctx);
 }
 
 // ──────────────────────────────────────────────
-// المستمع الرئيسي
+// المستمع الرئيسي — callback عادية (غير async) عمداً
 // ──────────────────────────────────────────────
 function startListener(api, startTime) {
-  // ✅ الـ callback هنا دالة عادية (غير async) عمداً —
-  // نستدعي handleEvent() ونلتقط أي خطأ بـ .catch()
-  // بدلاً من async مباشرة التي تُسكت الأخطاء.
   api.listenMqtt((err, event) => {
     if (err) {
       console.error('[ListenMqtt Error]', err);
       setTimeout(() => startListener(api, startTime), 5000);
       return;
     }
-
     handleEvent(api, event, startTime).catch((e) => {
-      console.error('[handleEvent] خطأ غير متوقع:', e);
+      console.error('[handleEvent] خطأ:', e);
     });
   });
 }
 
 // ──────────────────────────────────────────────
-// تسجيل الدخول وبدء التشغيل
+// تسجيل الدخول — يقرأ appstate.json مباشرة
+// لا حاجة لمتغير APPSTATE في Railway
 // ──────────────────────────────────────────────
 (async () => {
   let appState;
   try {
-    const raw = Buffer.from(process.env.APPSTATE, 'base64').toString('utf8');
-    appState  = JSON.parse(raw);
+    appState = JSON.parse(fs.readFileSync('./appstate.json', 'utf8'));
+    console.log('[Startup] ✅ تم تحميل appstate.json');
   } catch (e) {
-    console.error('[Startup] فشل فك تشفير APPSTATE:', e);
+    console.error('[Startup] فشل قراءة appstate.json:', e.message);
     process.exit(1);
   }
 
@@ -195,17 +171,15 @@ function startListener(api, startTime) {
 
       const startTime = Date.now();
 
-      // حفظ الجلسة كل 5 دقائق
+      // حفظ الجلسة كل 5 دقائق في appstate.json
       startSessionSaver(api);
 
-      // استئناف الإرسال التلقائي إن وُجد
       if (config.autosend && config.autosendThreadID) {
         startAutoSend(api);
         console.log('[igris] ▶️ استؤنف الإرسال التلقائي.');
       }
 
-      // حلقة تصفح في الخلفية — تُبقي البوت نشطاً بشكل طبيعي
-      // ✅ نفس النمط الآمن: دالة async مستقلة تُلتقط أخطاؤها
+      // حلقة تصفح في الخلفية
       (async function browsingLoop() {
         while (true) {
           await simulateBrowsing().catch((e) => {
