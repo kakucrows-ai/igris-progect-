@@ -7,6 +7,7 @@
  * حالات في مكان واحد بدل تكرار نفس المنطق في كل دالة إرسال.
  */
 
+// Fix 8: صُحِّح التعليق ليطابق القيمة الفعلية 3000ms (3 ثوانٍ)
 const TYPING_TIMEOUT_MS = 3000; // الحد الأقصى للانتظار قبل المتابعة بالقوة
 
 function sleep(ms) {
@@ -16,8 +17,8 @@ function sleep(ms) {
 /**
  * safeTyping(api, threadID, durationMs)
  *
- * 1) تُطلق sendTypingIndicator مع Promise.race ضد timeout بـ 8 ثوانٍ —
- *    إذا لم تردّ المكتبة خلال 8 ث، نُكمل بدون توقف.
+ * 1) تُطلق sendTypingIndicator مع Promise.race ضد timeout بـ 3 ثوانٍ —
+ *    إذا لم تردّ المكتبة خلال 3 ث، نُكمل بدون توقف.
  * 2) تتحقق من typeof stopFn === 'function' قبل استدعائها.
  * 3) تُحيط stopFn() بـ try/catch حتى لا يرمي استثناء صامتاً.
  * 4) تستدعي stopFn دائماً في finally — حتى لو انقطع الاتصال أثناء الانتظار.
@@ -25,7 +26,7 @@ function sleep(ms) {
 async function safeTyping(api, threadID, durationMs) {
   let stopFn = null;
 
-  // المرحلة 1: الحصول على stopFn مع timeout
+  // المرحلة 1: الحصول على stopFn مع timeout 3 ثوانٍ
   await Promise.race([
     new Promise((resolve) => {
       try {
@@ -41,7 +42,7 @@ async function safeTyping(api, threadID, durationMs) {
         resolve();
       }
     }),
-    // timeout: إذا لم تردّ المكتبة خلال 8 ثوانٍ → نكمل
+    // timeout: إذا لم تردّ المكتبة خلال 3 ثوانٍ → نكمل
     sleep(TYPING_TIMEOUT_MS),
   ]);
 
