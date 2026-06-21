@@ -15,8 +15,9 @@ const APPSTATE_PATH = path.resolve('./appstate.json');
 const BACKUP_PATH   = path.resolve('./appstate.backup.json');
 const SAVE_INTERVAL = 5 * 60 * 1000;
 
-// اسم المستودع يُقرأ من متغير بيئة واحد فقط
-const GH_REPO  = process.env.GH_REPO  || 'kakucrows-ai/igris-progect-';
+// Fix 9: اسم المستودع يُقرأ من متغير بيئة فقط — بدون قيمة مُشفَّرة في الكود
+// اضبط GH_REPO في .env أو Railway Variables (راجع .env.example)
+const GH_REPO  = process.env.GH_REPO  || '';
 const GH_TOKEN = process.env.GH_TOKEN || process.env.GITHUB_TOKEN || '';
 
 // الكوكيز الحساسة التي تحتاج httpOnly
