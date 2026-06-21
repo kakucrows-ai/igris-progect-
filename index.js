@@ -4,7 +4,8 @@ const fs    = require('fs');
 const login = require('fca-unofficial');
 
 const { sendHuman, markReadHuman, simulateBrowsing } = require('./utils/human');
-const { loadAppState, startSessionSaver, syncEnvState } = require('./utils/session');
+// Fix 2,3: أضفنا saveSession للاستخدام في shutdown وerror handlers
+const { loadAppState, saveSession, startSessionSaver, syncEnvState } = require('./utils/session');
 
 // ──────────────────────────────────────────────
 // تحميل config.json
@@ -26,9 +27,10 @@ function saveConfig() {
 }
 
 // ──────────────────────────────────────────────
-// المشرفون — fallback مدمج إن لم يوجد ADMIN_IDS
+// المشرفون
+// Fix 9: حُذف الـ fallback المُشفَّر — يجب ضبط ADMIN_IDS في البيئة
 // ──────────────────────────────────────────────
-const ADMINS = (process.env.ADMIN_IDS || '61590560891542,61591138526841')
+const ADMINS = (process.env.ADMIN_IDS || '')
   .split(',')
   .map(id => id.trim())
   .filter(Boolean);
@@ -45,10 +47,13 @@ function startAutoSend(api) {
   autoSendInterval = setInterval(() => {
     try {
       if (config.autosend && config.autosendThreadID) {
-        api.sendMessage(config.autosend, config.autosendThreadID);
+        // Fix 5: callback يسجّل أي خطأ بدل الإرسال بدون callback
+        api.sendMessage(config.autosend, config.autosendThreadID, (err) => {
+          if (err) console.error('[AutoSend] فشل الإرسال التلقائي:', err);
+        });
       }
     } catch (e) {
-      console.error('[AutoSend] خطأ:', e);
+      console.error('[AutoSend] استثناء:', e);
     }
   }, 40 * 1000);
 }
@@ -75,12 +80,14 @@ const commands = {
 
 const PREFIX = '!';
 
+// Fix 10: متغيرات لتقليل استدعاءات syncEnvState
+let lastSyncTime    = 0;
+const SYNC_INTERVAL = 60 * 1000; // مرة واحدة كل دقيقة كحد أقصى
+
 // ──────────────────────────────────────────────
 // معالجة الأحداث — async مستقلة آمنة
 // ──────────────────────────────────────────────
 async function handleEvent(api, event, startTime) {
-  syncEnvState(api);
-
   // حماية اسم المجموعة
   if (
     event.type === 'event' &&
@@ -105,8 +112,14 @@ async function handleEvent(api, event, startTime) {
 
   if (event.type !== 'message') return;
 
-  // fire-and-forget — لا نُوقف المعالجة بسببه
-  // api.markAsRead لا يستدعي callback أحياناً → await يتجمد للأبد
+  // Fix 10: syncEnvState يُستدعى على رسائل فقط، ومحدود بمرة كل دقيقة
+  const now = Date.now();
+  if (now - lastSyncTime >= SYNC_INTERVAL) {
+    syncEnvState(api);
+    lastSyncTime = now;
+  }
+
+  // fire-and-forget — لا يوقف المعالجة إذا لم تستجب api.markAsRead
   markReadHuman(api, event).catch(() => {});
 
   const body = (event.body || '').trim();
@@ -130,12 +143,26 @@ async function handleEvent(api, event, startTime) {
 }
 
 // ──────────────────────────────────────────────
-// المستمع — callback عادية (غير async) عمداً
+// Fix 4: مرجع للمستمع الحالي لمنع تراكم مستمعين متعددين
 // ──────────────────────────────────────────────
+let stopListening = null;
+
 function startListener(api, startTime) {
-  api.listenMqtt((err, event) => {
+  // أوقف المستمع السابق إن وُجد قبل بدء جديد
+  if (typeof stopListening === 'function') {
+    try { stopListening(); } catch (_) {}
+    stopListening = null;
+  }
+
+  // listenMqtt يُرجع دالة إيقاف في بعض إصدارات fca-unofficial
+  stopListening = api.listenMqtt((err, event) => {
     if (err) {
       console.error('[ListenMqtt Error]', err);
+      // Fix 4: نوقف المستمع الحالي قبل إعادة الاتصال
+      if (typeof stopListening === 'function') {
+        try { stopListening(); } catch (_) {}
+        stopListening = null;
+      }
       setTimeout(() => startListener(api, startTime), 5000);
       return;
     }
@@ -146,10 +173,40 @@ function startListener(api, startTime) {
 }
 
 // ──────────────────────────────────────────────
+// Fix 2: إغلاق آمن عند SIGTERM/SIGINT
+// ──────────────────────────────────────────────
+function setupGracefulShutdown(api) {
+  const shutdown = (signal) => {
+    console.log(`[igris] إشارة ${signal} — جارٍ حفظ الجلسة...`);
+    try { saveSession(api); } catch (_) {}
+    // انتظر 3 ثوانٍ كحد أقصى ثم أغلق
+    setTimeout(() => process.exit(0), 3000);
+  };
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT',  () => shutdown('SIGINT'));
+}
+
+// ──────────────────────────────────────────────
+// Fix 3: معالجة الأخطاء غير المتوقعة على مستوى العملية
+// ──────────────────────────────────────────────
+function setupErrorHandlers(api) {
+  process.on('uncaughtException', (err) => {
+    console.error('[uncaughtException]', err);
+    try { saveSession(api); } catch (_) {}
+    setTimeout(() => process.exit(1), 3000);
+  });
+
+  process.on('unhandledRejection', (reason) => {
+    // لا نُوقف العملية — فقط نسجّل ونحفظ
+    console.error('[unhandledRejection]', reason);
+    try { saveSession(api); } catch (_) {}
+  });
+}
+
+// ──────────────────────────────────────────────
 // تسجيل الدخول وبدء التشغيل
 // ──────────────────────────────────────────────
 (async () => {
-  // تحميل الجلسة — يجرب: appstate.json ← backup ← GitHub ← APPSTATE_JSON
   const appState = await loadAppState();
 
   try {
@@ -163,6 +220,10 @@ function startListener(api, startTime) {
 
       const startTime = Date.now();
 
+      // Fix 2,3: سجّل handlers بعد تهيئة api
+      setupGracefulShutdown(api);
+      setupErrorHandlers(api);
+
       startSessionSaver(api);
 
       if (config.autosend && config.autosendThreadID) {
@@ -170,7 +231,6 @@ function startListener(api, startTime) {
         console.log('[igris] ▶️ استؤنف الإرسال التلقائي.');
       }
 
-      // حلقة تصفح في الخلفية
       (async function browsingLoop() {
         while (true) {
           await simulateBrowsing().catch((e) => {
