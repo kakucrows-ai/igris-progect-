@@ -2,28 +2,19 @@
  * session.js
  * إدارة جلسة فيسبوك (appstate.json) مع:
  *  - تطبيع الكوكيز الناقصة (normalizeCookie)
- *  - جلب الجلسة من GitHub كحل احتياطي عند فشل القراءة المحلية
- *  - دعم APPSTATE_JSON كبذرة أولى لبيئات Railway الجديدة
+ *  - قراءة الجلسة من القرص المحلي فقط (appstate.json أو appstate.backup.json)
  *  - حفظ دوري يُحدِّث appstate.json على القرص
  */
 
 const fs   = require('fs');
 const path = require('path');
-const https = require('https');
 
 const APPSTATE_PATH = path.resolve('./appstate.json');
 const BACKUP_PATH   = path.resolve('./appstate.backup.json');
 const SAVE_INTERVAL = 5 * 60 * 1000;
 
-// Fix 9: اسم المستودع يُقرأ من متغير بيئة فقط — بدون قيمة مُشفَّرة في الكود
-// اضبط GH_REPO في .env أو Railway Variables (راجع .env.example)
-const GH_REPO  = process.env.GH_REPO  || '';
-const GH_TOKEN = process.env.GH_TOKEN || process.env.GITHUB_TOKEN || '';
-
 // الكوكيز الحساسة التي تحتاج httpOnly
 const SENSITIVE_KEYS = new Set(['xs', 'c_user', 'fr']);
-// الكوكيز المهمة التي تحتاج expirationDate افتراضياً
-const CRITICAL_KEYS  = new Set(['c_user', 'xs', 'fr', 'datr', 'sb', 'dbln', 'presence', 'wd']);
 
 // ──────────────────────────────────────────────
 // 1. normalizeCookie
@@ -66,73 +57,10 @@ function _atomicWrite(filePath, data) {
 }
 
 // ──────────────────────────────────────────────
-// 3. fetchFromGitHub — جلب appstate.json من GitHub كحل احتياطي
-// ──────────────────────────────────────────────
-function fetchFromGitHub() {
-  return new Promise((resolve, reject) => {
-    if (!GH_TOKEN) {
-      return reject(new Error('[Session] GH_TOKEN غير مضبوط، لا يمكن جلب الجلسة من GitHub'));
-    }
-
-    const options = {
-      hostname: 'api.github.com',
-      path: `/repos/${GH_REPO}/contents/appstate.json`,
-      method: 'GET',
-      headers: {
-        'Authorization': `token ${GH_TOKEN}`,
-        'User-Agent':    'igris-bot-session',
-        'Accept':        'application/vnd.github.v3+json',
-      },
-    };
-
-    const req = https.request(options, (res) => {
-      let raw = '';
-      res.on('data', chunk => { raw += chunk; });
-      res.on('end', () => {
-        try {
-          const parsed  = JSON.parse(raw);
-          if (!parsed.content) return reject(new Error('[Session] GitHub: محتوى فارغ'));
-          const content = Buffer.from(parsed.content, 'base64').toString('utf8');
-          const state   = JSON.parse(content);
-          if (!Array.isArray(state)) return reject(new Error('[Session] GitHub: صيغة غير صحيحة'));
-          resolve(state);
-        } catch (e) {
-          reject(e);
-        }
-      });
-    });
-
-    req.on('error', reject);
-    req.setTimeout(10000, () => {
-      req.destroy(new Error('[Session] انتهت مهلة GitHub'));
-    });
-    req.end();
-  });
-}
-
-// ──────────────────────────────────────────────
-// 4. loadAppState — تحميل الجلسة مع الاحتياطيات
-//    الترتيب: appstate.json ← appstate.backup.json ← GitHub
+// 3. loadAppState — قراءة الجلسة من القرص فقط
+//    الترتيب: appstate.json ← appstate.backup.json ← خروج صريح
 // ──────────────────────────────────────────────
 async function loadAppState() {
-  // دعم APPSTATE_JSON كبذرة أولى (JSON أو Base64)
-  if (!fs.existsSync(APPSTATE_PATH) && process.env.APPSTATE_JSON) {
-    console.log('[Session] APPSTATE_JSON موجود — كتابته على القرص...');
-    try {
-      let raw = process.env.APPSTATE_JSON.trim();
-      // إذا لم يبدأ بـ [ جرّب base64
-      if (!raw.startsWith('[') && !raw.startsWith('{')) {
-        raw = Buffer.from(raw, 'base64').toString('utf8');
-      }
-      const state = JSON.parse(raw);
-      if (!Array.isArray(state)) throw new Error('صيغة غير صحيحة');
-      _atomicWrite(APPSTATE_PATH, state);
-      console.log('[Session] ✅ تم كتابة appstate.json من APPSTATE_JSON');
-    } catch (e) {
-      console.error('[Session] فشل تحليل APPSTATE_JSON:', e.message);
-    }
-  }
-
   // المحاولة 1: الملف الرئيسي
   if (fs.existsSync(APPSTATE_PATH)) {
     try {
@@ -171,24 +99,13 @@ async function loadAppState() {
     }
   }
 
-  // المحاولة 3: جلب من GitHub
-  console.warn('[Session] جميع المصادر المحلية فشلت — جلب من GitHub...');
-  try {
-    const state = await fetchFromGitHub();
-    _atomicWrite(APPSTATE_PATH, state);
-    console.log('[Session] ✅ تم جلب appstate.json من GitHub وكتابته محلياً');
-    return state.map(normalizeCookie);
-  } catch (e) {
-    console.error('[Session] فشل جلب GitHub:', e.message);
-    // لا يوجد مصدر — توقف صريح مع رسالة واضحة
-    console.error('[Session] ❌ لا يوجد appstate صالح — توقف البوت');
-    process.exit(1);
-    return; // return صريحة بعد exit لمنع تنفيذ أي كود لاحق
-  }
+  // لا يوجد مصدر صالح — توقف صريح
+  console.error('[Session] ❌ لم يُعثر على appstate.json أو appstate.backup.json صالح — ضع الملف في جذر المشروع وأعد التشغيل');
+  process.exit(1);
 }
 
 // ──────────────────────────────────────────────
-// 5. saveSession — حفظ الجلسة الحالية على القرص
+// 4. saveSession — حفظ الجلسة الحالية على القرص
 // ──────────────────────────────────────────────
 function saveSession(api) {
   try {
@@ -210,12 +127,4 @@ function startSessionSaver(api) {
   console.log('[Session] بدأ الحفظ التلقائي كل 5 دقائق في appstate.json');
 }
 
-// يُحدِّث process.env للاستخدام الداخلي فقط
-function syncEnvState(api) {
-  try {
-    const state = api.getAppState();
-    process.env.APPSTATE = Buffer.from(JSON.stringify(state)).toString('base64');
-  } catch (_) {}
-}
-
-module.exports = { loadAppState, saveSession, startSessionSaver, syncEnvState, normalizeCookie };
+module.exports = { loadAppState, saveSession, startSessionSaver, normalizeCookie };
