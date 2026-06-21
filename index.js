@@ -1,7 +1,7 @@
 require('dotenv').config();
 
 const fs    = require('fs');
-const login = require('fca-unofficial');
+const login = require('@dongdev/fca-unofficial');
 
 const { sendHuman, markReadHuman, simulateBrowsing } = require('./utils/human');
 const { loadAppState, saveSession, startSessionSaver } = require('./utils/session');
