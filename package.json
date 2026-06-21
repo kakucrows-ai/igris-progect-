@@ -6,7 +6,7 @@
     "start": "node index.js"
   },
   "dependencies": {
-    "fca-unofficial": "2.16.1",
+    "@dongdev/fca-unofficial": "4.0.3",
     "dotenv": "16.4.5"
   }
 }
